@@ -1,0 +1,54 @@
+name: Update NHL data
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch NHL data
+        run: |
+          python - <<'PY'
+          import json, urllib.request, datetime
+          base='https://api-web.nhle.com/v1'
+          def get(url):
+              req=urllib.request.Request(url,headers={'User-Agent':'NHL-Russia/7.0'})
+              with urllib.request.urlopen(req,timeout=20) as r:
+                  return json.load(r)
+          today=datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+          s=get(f'{base}/score/{today}')
+          st=get(f'{base}/standings/now')
+          games=[]
+          for g in s.get('games',[]):
+              a=g.get('awayTeam',{}); h=g.get('homeTeam',{})
+              games.append({
+                  'away':a.get('abbrev',a.get('placeName',{}).get('default','—')),
+                  'home':h.get('abbrev',h.get('placeName',{}).get('default','—')),
+                  'awayScore':a.get('score','—'),
+                  'homeScore':h.get('score','—'),
+                  'status':g.get('gameState','')
+              })
+          standings=[]
+          for x in st.get('standings',[]):
+              standings.append({
+                  'team':x.get('teamAbbrev',{}).get('default','—'),
+                  'pts':x.get('points','—'),
+                  'wins':x.get('wins','—'),
+                  'losses':x.get('losses','—'),
+                  'diff':x.get('goalDifferential','—')
+              })
+          with open('data.json','w',encoding='utf-8') as f:
+              json.dump({'updated':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                         'games':games,'standings':standings},f,ensure_ascii=False)
+          PY
+      - name: Commit data
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add data.json
+          git diff --cached --quiet || git commit -m "Update NHL data"
+          git push
